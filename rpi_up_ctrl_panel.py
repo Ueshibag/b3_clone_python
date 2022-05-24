@@ -20,6 +20,7 @@ Selection of the following setBfree settings:
 import os
 import time
 import asyncio
+import serial
 
 import serial_asyncio
 from gpiozero import Button
@@ -53,6 +54,8 @@ volume_rotary = RotaryEncoder(23, 24, max_steps=MAX_VOLUME)
 MAX_REVERB = 50
 reverb_rotary = RotaryEncoder(25, 26, max_steps=MAX_REVERB)  # sets the setBfree reverb level
 
+ARDUINO_SYNC = b'0\n'
+
 
 def display_drawbar_position(drawbar):
     """
@@ -83,10 +86,13 @@ def display_drawbar_position(drawbar):
 
     lcd.set_cursor(lcd_row, lcd_col)
     lcd.println(drawbar_position)
+    print('display_drawbar_position ' + drawbar_position)
 
 
 class DrawbarsAsyncReader(asyncio.Protocol):
-
+    """
+    Asynchronously reads drawbars information from the Arduino.
+    """
     def __init__(self):
         self.transport = None
         self.buf = bytes()
@@ -94,10 +100,13 @@ class DrawbarsAsyncReader(asyncio.Protocol):
     def connection_made(self, tport):
         self.transport = tport
         tport.serial.rts = False  # You can manipulate Serial object via transport
-        # transport.write(b'Hello, World!\n')  # Write serial data via transport
 
     def data_received(self, data):
-        """ Store characters until a newline is received """
+        """
+        Stores characters until a newline is received, then displays drawbars positions.
+        :param data: stream of MIDI CC messages sent by the Arduino and separated by NL
+        """
+        print('data_received : ' + str(data))
         self.buf += data
 
         if b'\n' in self.buf:
@@ -120,22 +129,26 @@ def set_registration_1():
     """
     Called when user presses the Registration 1 button.
     """
+    print('set_registration_1')
     registration_led_1.on()
     registration_led_2.off()
     lcd.clear()
     lcd.set_cursor(0, 0)
     lcd.println("Registration 1")
+    sync_serial.write(b'1\n')
 
 
 def set_registration_2():
     """
     Called when user presses the Registration 2 button.
     """
+    print('set_registration_2')
     registration_led_1.off()
     registration_led_2.on()
     lcd.clear()
     lcd.set_cursor(1, 0)
     lcd.println("Registration 2")
+    sync_serial.write(b'2\n')
 
 
 def init_registration():
@@ -177,6 +190,7 @@ def on_power_up():
     - The global volume is set to 10%.
     - The reverb is set to 0.
     """
+    print('on_power_up')
     lcd.clear()
     lcd.set_cursor(0, 0)
     lcd.println("Hammond B3 Clone")
@@ -189,44 +203,44 @@ def on_power_up():
     init_reverb()
 
 
-def on_shut_down():
+def on_shut_down(rpi_shutdown=True):
     """
     User shuts down the organ.
     """
+    print('on_shut_down')
     global lcd
     lcd.clear()
     lcd.set_cursor(0, 0)
     lcd.println("===== Bye =====")
     time.sleep(3)
-    os.system("sudo shutdown -h now")
+    lcd.clear()
+
+    if rpi_shutdown:
+        os.system("sudo shutdown -h now")
+    else:
+        exit(0)
 
 
 def handler(signal_received, frame):
-    # Handle any cleanup here
     print('SIGINT or CTRL-C detected. Exiting.')
-    lcd.clear()
-    lcd.set_cursor(0, 0)
-    lcd.println("=== Exiting ===")
-    time.sleep(3)
-    lcd.clear()
-    exit(0)
+    on_shut_down(rpi_shutdown=False)
 
 
 if __name__ == '__main__':
-    # tell Python to run the handler() function when SIGINT is received
+    # tell Python to run the handler() function when SIGINT or CTRL-C is received
     signal(SIGINT, handler)
 
-    # power_on_off_switch.when_held = on_shut_down
+    power_on_off_switch.when_held = on_shut_down
 
     # initialize the organ if ON/OFF switch is set ON (open)
-    # power_on_off_switch.when_deactivated = on_power_up
+    power_on_off_switch.when_deactivated = on_power_up
 
-    # for test purpose, while I am working on table
+    sync_serial = serial.Serial(DRAWBARS_TTY, 115200, timeout=1)  # for synchronous write to the Arduino
     on_power_up()
 
     loop = asyncio.get_event_loop()
-    reader = serial_asyncio.create_serial_connection(loop, DrawbarsAsyncReader, DRAWBARS_TTY, baudrate=115200)
-    asyncio.ensure_future(reader)
+    drawbars_reader = serial_asyncio.create_serial_connection(loop, DrawbarsAsyncReader, DRAWBARS_TTY, baudrate=115200)
+    asyncio.ensure_future(drawbars_reader)
     loop.run_forever()
 
     # keep the program listening for the different events
