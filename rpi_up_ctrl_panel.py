@@ -151,6 +151,31 @@ def set_registration_2():
     sync_serial.write(b'2\n')
 
 
+def menus_forward():
+    print('rotating menu forward')
+    # TODO: does not work
+
+
+def menus_backward():
+    print('rotating menu backward')
+    # TODO: does not work
+
+
+def menus_button_pressed():
+    print('menus_button_pressed')
+
+
+def init_menus_navigation():
+    """
+    Initializes LCD menus rotary encoder actions.
+    """
+    print('init_menus_navigation')
+    menus_rotary.when_rotated = menus_forward
+    menus_rotary.when_rotated_clockwise = menus_forward
+    menus_rotary.when_rotated_counter_clockwise = menus_backward
+    menus_push.when_pressed = menus_button_pressed
+
+
 def init_registration():
     """
     Initializes registration LEDs state and buttons actions.
@@ -198,6 +223,7 @@ def on_power_up():
     lcd.println("=== Welcome! ===")
     time.sleep(3)
 
+    init_menus_navigation()
     init_registration()
     init_volume()
     init_reverb()
@@ -209,11 +235,21 @@ def on_shut_down(rpi_shutdown=True):
     """
     print('on_shut_down')
     global lcd
+
+    # turn LCD off
     lcd.clear()
     lcd.set_cursor(0, 0)
     lcd.println("===== Bye =====")
     time.sleep(3)
     lcd.clear()
+
+    # turn registration buttons LEDs off
+    registration_led_1.off()
+    registration_led_2.off()
+
+    # turn drawbars boards LEDs off
+    # TODO: modify Arduino code to accept this cmd 
+    sync_serial.write(b'3\n')
 
     if rpi_shutdown:
         os.system("sudo shutdown -h now")
@@ -237,7 +273,7 @@ if __name__ == '__main__':
 
     sync_serial = serial.Serial(DRAWBARS_TTY, 115200, timeout=1)  # for synchronous write to the Arduino
     on_power_up()
-
+    
     loop = asyncio.get_event_loop()
     drawbars_reader = serial_asyncio.create_serial_connection(loop, DrawbarsAsyncReader, DRAWBARS_TTY, baudrate=115200)
     asyncio.ensure_future(drawbars_reader)
