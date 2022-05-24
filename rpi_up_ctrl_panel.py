@@ -19,6 +19,9 @@ Selection of the following setBfree settings:
 """
 import os
 import time
+import asyncio
+
+import serial_asyncio
 from gpiozero import Button
 from gpiozero import LED
 from signal import pause
@@ -26,6 +29,8 @@ from gpiozero import RotaryEncoder
 from i2c_lcd import Lcd
 from signal import signal, SIGINT
 from sys import exit
+
+DRAWBARS_TTY = '/dev/ttyACM0'
 
 # shut down the organ if ON/OFF switch is held OFF (closed) at least 3 seconds
 power_on_off_switch = Button(9, hold_time=3.0)
@@ -47,6 +52,68 @@ volume_rotary = RotaryEncoder(23, 24, max_steps=MAX_VOLUME)
 
 MAX_REVERB = 50
 reverb_rotary = RotaryEncoder(25, 26, max_steps=MAX_REVERB)  # sets the setBfree reverb level
+
+
+def display_drawbar_position(drawbar):
+    """
+    Displays drawbars positions values (0 to 8) to LCD.
+    :param drawbar: 3-byte drawbar information:
+                    - 0xB0 | MIDI channel
+                    - drawbar index (70 to 78 for upper keyboard)
+                    - drawbar position
+    """
+    lcd_row = 0
+    lcd_col = 0
+    lcd.set_cursor(0, 0)
+    lcd.println('Upper: ')
+    lcd.set_cursor(1, 0)
+    lcd.println('Lower: ')
+
+    # associate drawbar position value sent by the Arduino with index value from 0 to 8 to be displayed by LCD
+    position_dict = {127: '0', 110: '1', 92: '2', 79: '3', 63: '4', 47: '5', 31: '6', 15: '7', 0: '8'}
+    drawbar_position = position_dict[drawbar[2]]
+
+    if drawbar[0] == 0xb0 or drawbar[0] == 0xb3:
+        lcd_row = 0  # upper kb / registration 1 or 2
+        lcd_col = drawbar[1] - 70 + 7
+
+    elif drawbar[0] == 0xb1 or drawbar[0] == 0xb4:
+        lcd_row = 1  # lower kb / registration 1 or 2
+        lcd_col = 0
+
+    lcd.set_cursor(lcd_row, lcd_col)
+    lcd.println(drawbar_position)
+
+
+class DrawbarsAsyncReader(asyncio.Protocol):
+
+    def __init__(self):
+        self.transport = None
+        self.buf = bytes()
+
+    def connection_made(self, tport):
+        self.transport = tport
+        tport.serial.rts = False  # You can manipulate Serial object via transport
+        # transport.write(b'Hello, World!\n')  # Write serial data via transport
+
+    def data_received(self, data):
+        """ Store characters until a newline is received """
+        self.buf += data
+
+        if b'\n' in self.buf:
+            lines = self.buf.split(b'\n')
+            self.buf = lines[-1]  # whatever was left over
+            for draw_bar in lines[:-1]:
+                display_drawbar_position(draw_bar)
+
+    def connection_lost(self, exc):
+        self.transport.loop.stop()
+
+    def pause_writing(self):
+        print(self.transport.get_write_buffer_size())
+
+    def resume_writing(self):
+        print(self.transport.get_write_buffer_size())
 
 
 def set_registration_1():
@@ -128,6 +195,7 @@ def on_shut_down():
     """
     global lcd
     lcd.clear()
+    lcd.set_cursor(0, 0)
     lcd.println("===== Bye =====")
     time.sleep(3)
     os.system("sudo shutdown -h now")
@@ -136,6 +204,10 @@ def on_shut_down():
 def handler(signal_received, frame):
     # Handle any cleanup here
     print('SIGINT or CTRL-C detected. Exiting.')
+    lcd.clear()
+    lcd.set_cursor(0, 0)
+    lcd.println("=== Exiting ===")
+    time.sleep(3)
     lcd.clear()
     exit(0)
 
@@ -151,6 +223,11 @@ if __name__ == '__main__':
 
     # for test purpose, while I am working on table
     on_power_up()
+
+    loop = asyncio.get_event_loop()
+    reader = serial_asyncio.create_serial_connection(loop, DrawbarsAsyncReader, DRAWBARS_TTY, baudrate=115200)
+    asyncio.ensure_future(reader)
+    loop.run_forever()
 
     # keep the program listening for the different events
     pause()
