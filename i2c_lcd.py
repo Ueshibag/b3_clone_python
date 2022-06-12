@@ -51,7 +51,7 @@ LCD_5x8DOTS = 0x00
 
 LCD_CHR = 1  # Mode - Sending data
 LCD_CMD = 0  # Mode - Sending command
-    
+
 
 class Lcd:
     """

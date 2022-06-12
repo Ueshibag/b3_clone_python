@@ -125,3 +125,5 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+I2C_LCD_driver.py
